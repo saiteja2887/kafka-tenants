@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: multiclient-kafka
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/saiteja2887/kafka-tenants.git
+        revision: master
+        directories:
+          - path: helm-kafka-tenants/clients/preprod/*
+  template:
+    metadata:
+      name: "{{path.basename}}-app"
+    spec:
+      destination:
+        namespace: "{{path.basename}}"
+        server: https://kubernetes.default.svc
+      source:
+        repoURL: https://github.com/saiteja2887/kafka-tenants.git
+        path: "helm-kafka-tenants/clients/preprod/{{path.basename}}"
+      project: default
+      syncPolicy:
+        automated: {}
