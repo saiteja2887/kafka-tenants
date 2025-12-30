@@ -1,0 +1,133 @@
+name: Deploy Kafka Resources for Client
+on:
+  workflow_dispatch:
+    inputs:
+      client_name:
+        description: 'Client name (example: acme)'
+        required: true
+      env:
+        description: 'Environment (dev/preprod/prod)'
+        required: true
+      kafka_replicas:
+        description: 'Kafka broker replicas'
+        required: false
+        default: '3'
+      kafka_image:
+        description: 'Kafka Broker Image'
+        required: false
+        default: 'quay.io/yourorg/kafka:latest'
+      kafka_connect_image:
+        description: 'Kafka Connect Image'
+        required: false
+        default: 'quay.io/yourorg/kafka-connect:latest'
+      cpu_requests:
+        description: 'CPU requests (e.g. 100m)'
+        required: false
+        default: '100m'
+      memory_requests:
+        description: 'Memory requests (e.g. 256Mi)'
+        required: false
+        default: '256Mi'
+      cpu_limits:
+        description: 'CPU limits (e.g. 500m)'
+        required: false
+        default: '500m'
+      memory_limits:
+        description: 'Memory limits (e.g. 1Gi)'
+        required: false
+        default: '1Gi'
+      topics:
+        description: |
+          YAML array of topics, e.g.
+          - name: my-topic
+            partitions: 3
+            replicas: 2
+        required: false
+        default: |
+          - name: first-topic
+            partitions: 3
+            replicas: 1
+          - name: second-topic
+            partitions: 3
+            replicas: 1
+          - name: third-topic
+            partitions: 3
+            replicas: 1
+jobs:
+  render-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+
+      - name: Prepare Values and Directory
+        id: prep
+        env:
+          DOCKERCONFIGJSON: ${{ secrets.DOCKERCONFIGJSON }}
+        run: |
+          set -e
+          client_name="${{ github.event.inputs.client_name }}"
+          env_name="${{ github.event.inputs.env }}"
+          kafka_replicas="${{ github.event.inputs.kafka_replicas }}"
+          kafka_image="${{ github.event.inputs.kafka_image }}"
+          kafka_connect_image="${{ github.event.inputs.kafka_connect_image }}"
+          cpu_requests="${{ github.event.inputs.cpu_requests }}"
+          memory_requests="${{ github.event.inputs.memory_requests }}"
+          cpu_limits="${{ github.event.inputs.cpu_limits }}"
+          memory_limits="${{ github.event.inputs.memory_limits }}"
+          # Substitute with organization/account specific logic if needed, else keep static:
+          accountNumber="123456789012"
+          accountRegion="us-east-1"
+          bucketName="kafka-${env_name}-bucket"
+          namespace="${client_name}-ns"
+          cluster_name="${client_name}-cluster"
+          connector_name="${client_name}-connect"
+          irsa_role_arn="arn:aws:iam::${accountNumber}:role/eks-github-irsa-role"
+
+          # Write out topics.yaml block and convert for YAML nested insertion
+          echo "${{ github.event.inputs.topics }}" > /tmp/topics.yaml
+
+          mkdir -p ./helm-kafka-tenants/${env_name}/${client_name}
+          cat <<EOF > ./helm-kafka-tenants/${env_name}/${client_name}/values.yaml
+            clientName: ${client_name}
+            namespace: ${namespace}
+            clusterName: ${cluster_name}
+            kafkaReplicas: ${kafka_replicas}
+            connectorName: ${connector_name}
+            topics:
+            $(sed 's/^/  /' /tmp/topics.yaml) # indent the block
+            image: ${kafka_image}
+            kafkaImage: ${kafka_image}
+            irsaRoleArn: ${irsa_role_arn}
+            accountNumber: ${accountNumber}
+            accountRegion: ${accountRegion}
+            bucketName: ${bucketName}
+            s3Region: ${accountRegion}
+            kafkaConnectImage: ${kafka_connect_image}
+            resources:
+              requests:
+                cpu: "${cpu_requests}"
+                memory: "${memory_requests}"
+              limits:
+                cpu: "${cpu_limits}"
+                memory: "${memory_limits}"
+            dockerconfigjson: "${DOCKERCONFIGJSON}"
+            EOF
+
+      - name: Render Helm templates
+        run: |
+          cat ./helm-kafka-tenants/${{ github.event.inputs.env }}/${{ github.event.inputs.client_name }}/values.yaml
+          helm template kafka-client ./helm-kafka-tenants \
+            -f ./helm-kafka-tenants/${{ github.event.inputs.env }}/${{ github.event.inputs.client_name }}/values.yaml \
+            > ./helm-kafka-tenants/${{ github.event.inputs.env }}/${{ github.event.inputs.client_name }}/${{ github.event.inputs.client_name }}.yaml
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add ./helm-kafka-tenants/${{ github.event.inputs.env }}/${{ github.event.inputs.client_name }}/*
+          git commit -m "Add/update Kafka resources for ${{ github.event.inputs.client_name }} in ${{ github.event.inputs.env }}"
+          git push

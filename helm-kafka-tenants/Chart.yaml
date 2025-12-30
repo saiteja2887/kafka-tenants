@@ -1,0 +1,4 @@
+apiVersion: v2
+name: kafka-client
+version: 0.1.0
+description: Helm chart for multi-client Kafka cluster, topics, and connectors

@@ -1,0 +1,22 @@
+{{- if .Values.connectors }}
+{{- range .Values.connectors }}
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: {{ .name | quote }}
+  namespace: {{ $.Values.namespace | quote }}
+  labels:
+    strimzi.io/cluster: {{ $.Values.connectorName | quote }}
+spec:
+  class: {{ .class | quote }}
+  tasksMax: {{ .tasksMax | default 1 }}
+  config:
+    {{- range $key, $val := .config }}
+    {{ $key }}: {{ $val | quote }}
+    {{- end }}
+  {{- if .pause }}
+  pause: {{ .pause }}
+  {{- end }}
+{{- end }}
+{{- end }}
